@@ -1,47 +1,142 @@
-// ignore_for_file: prefer_const_declarations
+// ignore_for_file: prefer_const_constructors
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:location/location.dart';
 
 class HomeScreen extends StatefulWidget {
-  HomeScreen({Key? key}) : super(key: key);
+  const HomeScreen({super.key});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  List<Marker> _marker = [];
-  List<Marker> _listOfMarker = const [
-    Marker(
-        markerId: MarkerId('1'),
-        position: LatLng(23.792265005916146, 90.40561775869223),
-        infoWindow: InfoWindow(title: "My Current Location"))
-  ];
+  late final GoogleMapController _googleMapController;
 
-  static final CameraPosition _kGooglePlay = const CameraPosition(
-    zoom: 14,
-    target: LatLng(23.792265005916146, 90.40561775869223),
-  );
+  final Location _location = Location();
+  LatLng? _currentLocation;
+  StreamSubscription? _streamLocation;
+
+  late Marker _marker;
+  final List<LatLng> _latLngList = [];
+  final Set<Polyline> _polyLineSet = {};
+
+  bool isFollowing = true;
 
   @override
   void initState() {
+    listenToCurrentLocation();
     super.initState();
-    _marker.addAll(_listOfMarker);
+  }
+
+  void listenToCurrentLocation() {
+    _location.requestPermission();
+
+    _location.hasPermission().then((value) {
+      if (value == PermissionStatus.granted) {
+        _location.changeSettings(interval: 10000);
+
+        _streamLocation =
+            _location.onLocationChanged.listen((LocationData locationData) {
+          setState(() {
+            _currentLocation =
+                LatLng(locationData.latitude!, locationData.longitude!);
+
+            updateMarker();
+            updatePolyline();
+
+            if (isFollowing) {
+              _googleMapController
+                  .animateCamera(CameraUpdate.newLatLng(_currentLocation!));
+            }
+          });
+        });
+      }
+    });
+  }
+
+  void updateMarker() {
+    _marker = Marker(
+      markerId: const MarkerId('current_location'),
+      position: _currentLocation!,
+      infoWindow: InfoWindow(
+        title: 'My current location',
+        snippet:
+            'Lat: ${_currentLocation!.latitude}, Lng: ${_currentLocation!.longitude}',
+      ),
+      onTap: () {
+        _googleMapController
+            .showMarkerInfoWindow(const MarkerId('current_location'));
+      },
+    );
+  }
+
+  void updatePolyline() {
+    _latLngList.add(_currentLocation!);
+    _polyLineSet.add(Polyline(
+      polylineId: const PolylineId('polyline_list'),
+      points: _latLngList,
+      color: Colors.lightGreen,
+      width: 6,
+    ));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Google Map'),
+        title: const Text('Google Map'),
         centerTitle: true,
       ),
-      body: SafeArea(
-        child: GoogleMap(
-            markers: Set<Marker>.of(_marker),
-            initialCameraPosition: _kGooglePlay),
+      body: _currentLocation == null
+          ? loadingAndRefresh()
+          : GoogleMap(
+            compassEnabled: true,
+              onMapCreated: (GoogleMapController controller) {
+                _googleMapController = controller;
+              },
+              initialCameraPosition:
+                  CameraPosition(zoom: 14, target: _currentLocation!),
+              markers: {_marker},
+              polylines: _polyLineSet,
+              myLocationEnabled: true,
+              myLocationButtonEnabled: true,
+            ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          isFollowing = !isFollowing;
+            setState(() {
+                  listenToCurrentLocation();
+                });
+        },
+        child: Icon(
+          Icons.location_searching,
+          color: Colors.red,
+          size: 34,
+        ),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+    );
+  }
+
+  Center loadingAndRefresh() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(),
+       
+        ],
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _streamLocation?.cancel();
+    super.dispose();
   }
 }
